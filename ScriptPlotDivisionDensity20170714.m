@@ -8,8 +8,8 @@ maxprojdatadir = '/media/KellerS8/SV1/14-05-21/DivisionDetection/Kristin/Project
 maxprojfilestr = '*yzProjection*.klb';
 
 % where to save division density results
-outdir = '/nrs/branson/MouseLineaging/ComputeDivisionDensity_yz_v2';
-inmatfile = '/groups/branson/home/bransonk/tracking/code/Lineaging/MouseEmbryo/ComputeDivisionDensityInput_yz_v2.mat';
+outdir = '/nrs/branson/MouseLineaging/ComputeDivisionDensity_yz_v3';
+inmatfile = '/groups/branson/home/bransonk/tracking/code/Lineaging/MouseEmbryo/ComputeDivisionDensityInput_yz_v3.mat';
 if ~exist(outdir,'dir'),
   mkdir(outdir);
 end
@@ -45,7 +45,8 @@ isoscale = [1,1,5];
 
 % parameters for computing division density
 cdd = struct;
-cdd.filsig = [12.5,12.5,2.5,4];
+%cdd.filsig = [12.5,12.5,2.5,4];
+cdd.filsig = [50,50,10,4];
 cdd.filrad = ceil(2.5*cdd.filsig);
 cdd.filrad(4) = 4;
 cdd.thresh = 0.084;
@@ -74,6 +75,8 @@ m = regexp(maxprojfiles,'_TM(\d+)_','once','tokens');
 maxprojtimestamps = str2double([m{:}]);
 [maxprojtimestamps,order] = sort(maxprojtimestamps);
 maxprojfiles = maxprojfiles(order);
+
+T = min(max(round(cdd.list(:,4))),max(maxprojtimestamps));
 
 %% compute division density locally
 
