@@ -1,8 +1,9 @@
 function [hfig,hax] = PlotDivision(allinputdatafiles,alltimestamp,allpredidx,loc,rawsz,varargin)
 
-[scores_pert,peaks_pert,timepoints_pa,labellocs,thresh,boxrad,...
+[allscores,allpeaks,scores_pert,peaks_pert,timepoints_pa,labellocs,thresh,boxrad,...
   hfig,textstr0,textstr1,filename,figpos] = ...
   myparse(varargin,...
+  'allscores',[],'allpeaks',[],...
   'scores_pert',{},'peaks_pert',{},'timepoints_pa',[],...
   'labellocs',zeros(0,4),...
   'thresh',.001,...
@@ -49,29 +50,26 @@ clf(hfig);
 set(hfig,'Units','pixels','Position',figpos);
 hax = createsubplots(2,ncurr(end),.01,hfig);
 hax = reshape(hax,[2,ncurr(end)]);
+
+if ~isempty(allscores),
+  idxcurr = allscores >= thresh & ...
+    all(allpeaks >= v0,2) & all(allpeaks <= v1,2);
+  scores = allscores(idxcurr);
+  peaks = allpeaks(idxcurr,:);
+elseif ~isempty(scores_pert),
+  tipred = find(timepoints_pa >= v0(4) & timepoints_pa <= v1(4));
+  scores = cat(1,scores_pert{tipred});
+  peaks = cat(1,peaks_pert{tipred});
+else
+  scores = zeros(0,1);
+  peaks = zeros(0,4);
+end
+
+labelis = find(all(labellocs >= v0,2) & all(labellocs <= v1,2));
+
 for ti = 1:ncurr(end),
   t = ti + v0(end)-1;
   
-  % predictions in the current timepoint
-  tipred = find(timepoints_pa==t);
-  if isempty(tipred),
-    detis = [];
-  else
-    scores = scores_pert{tipred};
-    peaks = peaks_pert{tipred};
-    detis = find(scores >= thresh & ...
-      peaks(:,4) == t & ...
-      peaks(:,1) >= v0(1) & peaks(:,1) <= v1(1) & ...
-      peaks(:,2) >= v0(2) & peaks(:,2) <= v1(2) & ...
-      peaks(:,3) >= v0(3) & peaks(:,3) <= v1(3));
-  end
-  
-  % labels in the current timepoint
-  labelis = find(labellocs(:,4) == t & ...
-    labellocs(:,1) >= v0(1) & labellocs(:,1) <= v1(1) & ...
-    labellocs(:,2) >= v0(2) & labellocs(:,2) <= v1(2) & ...
-    labellocs(:,3) >= v0(3) & labellocs(:,3) <= v1(3));
-
   % draw raw image
   imagesc([v0(2),v1(2)],[v0(1),v1(1)],rawvid(:,:,ti),'Parent',hax(1,ti));
   
@@ -100,28 +98,38 @@ for ti = 1:ncurr(end),
   axis(hax(2,ti),'image');
   hold(hax(2,ti),'on');
 
-  % plot all predictions
-  for ii = 1:numel(detis),
-    i = detis(ii);
-    colori = ceil(scores(i)/max(scores)*ncolors);
+  % plot all labels
+  for ii = 1:numel(labelis),
+    i = labelis(ii);
+    if round(labellocs(i,4)) ~= t,
+      continue;
+    end
     for j = 1:2,
-      plot(hax(j,ti),double(peaks(i,2)),double(peaks(i,1)),'.','Color',colors(colori,:));
-      if j == 2,
+      plot(hax(j,ti),labellocs(i,2),labellocs(i,1),'ro','MarkerFaceColor','r');
+    end
+  end
+  
+end
+
+% plot all predictions
+for i = 1:numel(scores),
+  colori = ceil(scores(i)/max(scores)*ncolors);
+  for j = 1:2,
+    for ti = 1:ncurr(end),
+      t = round(ti + v0(end)-1);
+      if round(peaks(i,4)) == t,
+        marker = 's';
+      else
+        marker = '.';
+      end
+      plot(hax(j,ti),double(peaks(i,2)),double(peaks(i,1)),marker,'Color',colors(colori,:));
+      if j == 2 && round(peaks(i,4))==t,
         text(double(peaks(i,2)),double(peaks(i,1)),sprintf('%.2f',scores(i)),...
           'HorizontalAlignment','left','VerticalAlignment','middle',...
           'Color',colors(colori,:),'Parent',hax(j,ti));
       end
     end
   end
-
-  % plot all labels
-  for ii = 1:numel(labelis),
-    i = labelis(ii);
-    for j = 1:2,
-      plot(hax(j,ti),labellocs(i,2),labellocs(i,1),'o','Color',[1,.6,0]);
-    end
-  end
-  
 end
     
 colormap parula;

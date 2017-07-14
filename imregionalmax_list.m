@@ -23,7 +23,7 @@ dothresh = ~isempty(thresh);
 
 nidx = maxidx - minidx + 1;
 
-nchunks = ceil(nidx./chunkstep);
+nchunks = round((nidx-1)./chunkstep)+1;
 %nchunkstotal = prod(nchunks);
 
 imchunk = zeros(chunksize,class(list));

@@ -1,4 +1,4 @@
-function newlist = bwconncomp_list(list,sz,varargin)
+function [newlist,isdone] = bwconncomp_list(list,sz,varargin)
 
 [chunksize,chunkstep,minidx,maxidx] = ...
   myparse(varargin,'chunksize',[],'chunkstep',[],'minidx',ones(size(sz)),'maxidx',sz);
@@ -27,7 +27,13 @@ uniquechunkidx = unique(chunkidx);
 nuniquechunks = numel(uniquechunkidx);
 isdone = false(n,1);
 
+tic;
 for chunkii = 1:nuniquechunks,
+  
+  if toc > 10,
+    fprintf('Chunk %d / %d\n',chunkii,nuniquechunks);
+    tic;
+  end
   
   chunki = uniquechunkidx(chunkii);  
   chunkv = ind2subv(nchunks,chunki);
@@ -39,8 +45,8 @@ for chunkii = 1:nuniquechunks,
     idxcurr0 = idxcurr0 & v0(d) <= list(:,d) & v1(d) >= list(:,d);
   end
 
-  fprintf('Chunk %d: %s to %s, %d non-zero (%d / %d)\n',...
-    chunki,mat2str(v0),mat2str(v1),nnz(idxcurr0),chunkii,nuniquechunks);
+%   fprintf('Chunk %d: %s to %s, %d non-zero (%d / %d)\n',...
+%     chunki,mat2str(v0),mat2str(v1),nnz(idxcurr0),chunkii,nuniquechunks);
   
   if ~any(idxcurr0),
     continue;
@@ -62,7 +68,10 @@ for chunkii = 1:nuniquechunks,
     vs = ind2subv(chunksize,cccurr.PixelIdxList{i});
     isborder = any(any(~islast & ( (~isfirst & vs==1) | vs == chunksize)));
     if isborder,
-      fprintf('CC %d on border, ignoring in this chunk\n',i);
+      vsglobal = vs + v0 - 1;
+      ctr = mean(vsglobal,1);
+      fprintf('CC %d (%s) on border, mind = %f, ignoring in this chunk\n',i,num2str(ctr),...
+        min(sum(abs(vsglobal-vcenter),2)));
       continue;
     end
     ismcurr = ismember(idxcurr1,cccurr.PixelIdxList{i});
@@ -70,7 +79,7 @@ for chunkii = 1:nuniquechunks,
     scorecurr = max(list(idxcurr0(ismcurr),end));
     vsglobal = vs + v0 - 1;
     ctr = mean(vsglobal,1);
-    fprintf('Adding CC %d at %s\n',i,mat2str(ctr));
+    fprintf('Adding CC %d at %s, mind = %f\n',i,mat2str(ctr),min(sum(abs(vsglobal-vcenter),2)));
     newlist(end+1,:) = [ctr,scorecurr];
 %     imagesc(max(max(ischunk,[],3),[],4)); hold on; plot(ctr(2)-v0(2)+1,ctr(1)-v0(1)+1,'rx'); axis image
 %     drawnow;
