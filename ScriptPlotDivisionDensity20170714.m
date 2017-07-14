@@ -77,7 +77,7 @@ maxprojfiles = maxprojfiles(order);
 
 %% compute division density locally
 
-params = struct2paramscell(cdd);
+params = struct2paramscell(rmfield(cdd,{'list','sz'}));
 for t = 1:T,
   res = struct;
   [res.maxprojdiv,res.zdiv] = ComputeDivisionDensity(cdd.list,t,cdd.sz,params{:});
