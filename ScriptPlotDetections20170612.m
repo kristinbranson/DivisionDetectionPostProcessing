@@ -956,17 +956,18 @@ maxprojfiles = maxprojfiles(order);
 %% 
 
 cdd = struct;
-cdd.filsig = [50,50,10,4];
+%cdd.filsig = [50,50,10,4];
+cdd.filsig = [12.5,12.5,2.5,4];
 cdd.filrad = ceil(2.5*cdd.filsig);
 cdd.filrad(4) = 4;
-cdd.thresh = .15;
+cdd.thresh = 0.084;
 cdd.ncores = 4;
 cdd.list = nonmaxpredidx_combined;
 cdd.sz = [rawsz(1:3),max(allpredidx(:,4))];
 cdd.stepsz = [220,220,100,9];
 cdd.dim = 1;
-outdir = '/nrs/branson/MouseLineaging/ComputeDivisionDensity_yz';
-inmatfile = '/groups/branson/home/bransonk/tracking/code/Lineaging/MouseEmbryo/ComputeDivisionDensityInput_xz.mat';
+outdir = '/nrs/branson/MouseLineaging/ComputeDivisionDensity_yz_v2';
+inmatfile = '/groups/branson/home/bransonk/tracking/code/Lineaging/MouseEmbryo/ComputeDivisionDensityInput_yz_v2.mat';
 save(inmatfile,'-struct','cdd');
 
 if ~exist(outdir,'dir'),
@@ -974,7 +975,7 @@ if ~exist(outdir,'dir'),
 end
 SCRIPT = '/groups/branson/home/bransonk/tracking/code/Lineaging/MouseEmbryo/ComputeDivisionDensity/for_redistribution_files_only/run_ComputeDivisionDensity.sh';
 
-for t = 11:T
+for t = 1:T
   
   scriptfile = fullfile(outdir,sprintf('%d.sh',t));
   logfile = fullfile(outdir,sprintf('%d.log',t));
@@ -1026,7 +1027,7 @@ maxrho = nanmedian(maxrhos);
 % coeffsmaxint = regress(maxints',[1:T;ones(1,T)]');
 % maxintsfit = coeffsmaxint(1).*(1:T) + coeffsmaxint(2);
 
-vidobj = VideoWriter('Divisions_yz.avi');
+vidobj = VideoWriter('Divisions_yz_v2.avi');
 vidobj.FrameRate = 10;
 open(vidobj);
 
@@ -1074,3 +1075,93 @@ for t = 1:T,
   writeVideo(vidobj,colorim);
 end
 close(vidobj);
+
+%% parameter sweep
+
+filsigs_try = ...
+  [50,50,10,4
+  25,25,5,4
+  10,10,2,4
+  40,40,8,4
+  30,30,6,4
+  20,20,4,4
+  15,15,3,4];
+
+inmatfiles = cell(1,size(filsigs_try,1));
+for i = 1:size(filsigs_try,1),
+  
+  inmatfiles{i} = sprintf('/groups/branson/home/bransonk/tracking/code/Lineaging/MouseEmbryo/ComputeDivisionDensityInput_xz_%d.mat',i);
+  if exist(inmatfiles{i},'file'),
+    continue;
+  end
+  cddcurr = cdd;
+  cddcurr.filsig = filsigs_try(i,:);
+  cddcurr.filrad(1:3) = ceil(cddcurr.filsig(1:3).*2.5);
+  save(inmatfiles{i},'-struct','cddcurr');
+  
+end
+
+tstry = [66, 189, 293, 377];
+outdir = '/nrs/branson/MouseLineaging/ComputeDivisionDensity_yz_paramsweep';
+if ~exist(outdir,'dir'),
+  mkdir(outdir);
+end
+
+for i = 1:size(filsigs_try,1),
+
+  for ti = 1:numel(tstry),
+    
+    t = tstry(ti);
+    scriptfile = fullfile(outdir,sprintf('%d_%d.sh',t,i));
+    logfile = fullfile(outdir,sprintf('%d_%d.log',t,i));
+    outmatfile = fullfile(outdir,sprintf('%d_%d.mat',t,i));
+    if exist(outmatfile,'file'),
+      continue;
+    end
+    jobid = sprintf('CDD%d_%d',t,i);
+    fid = fopen(scriptfile,'w');
+    fprintf(fid,'if [ -d %s ]\n',TMP_ROOT_DIR);
+    fprintf(fid,'  then export MCR_CACHE_ROOT=%s.%s\n',MCR_CACHE_ROOT,jobid);
+    fprintf(fid,'fi\n');
+    fprintf(fid,'%s %s %s %d %s\n',...
+      SCRIPT,MCR,inmatfiles{i},t,outmatfile);
+    fclose(fid);
+    
+    unix(sprintf('chmod u+x %s',scriptfile));
+    cmd = sprintf('ssh login1 ''source /etc/profile; bsub -n %d -J %s -o ''%s'' ''\"%s\"''''',...
+      cdd.ncores,jobid,logfile,scriptfile);
+    unix(cmd);
+    
+  end
+end
+  
+hfig = 2;
+figure(hfig);
+clf;
+hax = createsubplots(numel(tstry),size(filsigs_try,1),.01);
+hax = reshape(hax,[numel(tstry),size(filsigs_try,1)]);
+
+[~,filorder] = sort(filsigs_try(:,1));
+
+for ti = 1:numel(tstry),
+  t = tstry(ti);
+  i = find(maxprojtimestamps == t);
+  maxprojim = readKLBstack(maxprojfiles{i});
+  for filii = 1:size(filsigs_try,1),
+  
+    fili = filorder(filii);
+    outmatfile = fullfile(outdir,sprintf('%d_%d.mat',t,fili));
+    if ~exist(outmatfile,'file'),
+      continue;
+    end
+    tmp = load(outmatfile);
+    
+    [~,~,colorim] = PlotDivisionDensity(maxprojim,tmp.maxprojdiv,'hax',hax(ti,filii),'maxint',maxintsmooth(t)*.75,'maxrho',max(tmp.maxprojdiv(:)));
+    newsz = [size(colorim,1),size(colorim,2)].*isoscale(otherdims);
+    colorim = max(0,min(1,imresize(colorim,newsz)));
+    image(colorim,'Parent',hax(ti,filii));
+    axis(hax(ti,filii),'image','off');
+    drawnow;
+  end
+  linkaxes(hax);
+end
