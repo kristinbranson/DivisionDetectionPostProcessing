@@ -1,5 +1,102 @@
+% [newlist,isdone] = imregionalmax_list(list,sz,...)
+% 
+% Performs filtering and non-maximal suppression in x, y, z, and t. To
+% avoid reading the entire spatiotemporal volume into memory
+% simultaneously, this function operates on sub-blocks of volume, then
+% combines the results for the middle regions of these blocks. If
+% startrunoncluster==true or fixrunoncluster==true, this function will
+% divide up the entire volume into chunks and call a compiled version of
+% this function on these chunks on the Janelia cluster. If
+% finishrunoncluster==true, this function will collect the results of
+% runs on chunks and combine them.
+% 
+% On a given spatiotemporal chunk, this function first filters with a
+% 4-d filter (either box or Gaussian, depending on parameters), as true
+% divisions tended to correspond to high detection values in a region,
+% not just a single voxel. Then, it calls imregionalmax to find local
+% maxima.
+%
+% Inputs:
+% list: n x 5 list of detection outputs from CNN (and sparsified using
+% SaveSparsePredictions). This can also be a file name, in which case it is
+% loaded and overrides any other parameters input. 
+% sz: 1 x 4 array indicating the size of the volume. This can also be a
+% file name, in which case it is the location to save results to. This
+% should only be used when list is an input file that specifies sz.
+% 
+% Outputs:
+% newlist: If startrunoncluster==true or fixrunoncluster==true, this is a
+% list of the output mat files where per-chunk results will be saved.
+% Otherwise, this is an m x 5 list of detections after filtering and
+% non-maximal suppression.
+% isdone: if finishrunsoncluster==true, whether all jobs were done or not.
+% Otherwise, this is just an empty matrix.
+%
+% Optional inputs:
+% 
+% chunksize: 1 x 4 array indicating the size of each chunk to operate on.
+% This should be much bigger than the expected size of a blob of detections
+% we want to reduce to a single detection via non-maximal suppression. The
+% bigger this is, the more exact the results, and the less overhead in
+% computation, but the more RAM is required. We used chunksize =
+% [100,100,50,20]. If this is not specified, it defaults to the min of 50
+% and the volume size. 
+% 
+% chunkstep: 1 x 4 array indicating the step in between chunks. This should
+% be smaller than the chunk size, as we want some overlap between adjacent
+% chunks so that we only need to use results on the interior of the chunk.
+% If not specified, this will default to chunkstep =
+% max(1,round(chunksize/2)). 
+%
+% thresh: threshold on the filtered detection scores. If not specified (or
+% empty), no thresholding will be done. This is the default behavior.
+%
+% filrad: 1 x 4 vector indicating the radius of the filter. Default:
+% filsig (either filsig or filrad must be specified for filtering to
+% happen). 
+%
+% filsig: 1 x 4 vector indicating the standard deviation of the filter. If
+% this is specified (or non-empty), Gaussian filtering is used, otherwise
+% box filtering is used. Default is []. 
+%
+% chunki0, chunki1: Range of chunks to run filtering and non-max
+% suppression on. Default: 1, inf. 
+% 
+% startrunoncluster: If this flag is true, then this will split up the
+% volume into chunks and run the chunks on the cluster (nchunksperjob at a
+% time). Default = false
+% 
+% fixrunoncluster: If this flag is true, then this will split up the
+% volume into chunks and run the chunks on the cluster (nchunksperjob at a
+% time). This differs from startrunoncluster in that it will only start
+% jobs that do not appear to be completed previously. Default = false.
+%
+% finishrunoncluster: If this flag is true, then this will collect and
+% combine results of jobs run on the cluster. Default = false
+%
+% nchunksperjob: Number of chunks to run in each job (see
+% startrunoncluster). Default=100.
+%
+% inmatfile: Required for starting and finishing runs on the cluster.
+% Name of file to store information about cluster runs. Default=''
+%
+% outdir: Required for starting runs on the cluster. Directory to save job
+% results to. Default = ''. 
+% 
+% outmatfilestr, scriptfilestr, logfilestr: File roots for temporary files
+% created for each job. Default = 'RegionalMax'
+% 
+% tmprootdir: where to store the MCR cache. Only needed for running jobs on
+% the cluster. default = /scratch/<username>
+% 
+% script: location of compiled version of this code
+% 
+% mcr: location of MCR
+%
+% ncores: max number of cores to use when deployed. 
 function [newlist,isdone] = imregionalmax_list2(list,sz,varargin)
 
+newlist = [];
 isdone = [];
 
 % version that runs on the cluster
@@ -33,13 +130,14 @@ else
 
   username = GetUserName();
   [chunksize,chunkstep,thresh,minidx,maxidx,filrad,filsig,chunki0,chunki1,...
-    startrunoncluster,finishrunoncluster,nchunksperjob,inmatfile,outdir,...
+    startrunoncluster,finishrunoncluster,fixrunoncluster,nchunksperjob,inmatfile,outdir,...
     outmatfilestr,scriptfilestr,logfilestr,...
     TMP_ROOT_DIR,MCR_CACHE_ROOT,SCRIPT,MCR,ncores] = ...
     myparse(varargin,'chunksize',[],'chunkstep',[],'thresh',[],'minidx',ones(size(sz)),'maxidx',sz,...
     'filrad',[],'filsig',[],...
     'chunki0',1,'chunki1',inf,...
     'startrunoncluster',false,'finishrunoncluster',false,...
+    'fixrunoncluster',false,...
     'nchunksperjob',100,...
     'inmatfile','','outdir','',...
     'outmatfilestr','RegionalMax','scriptfilestr','RegionalMax','logfilestr','RegionalMax',...
@@ -131,7 +229,7 @@ else
   uniquechunkidx = unique(chunkidx);
   nuniquechunks = numel(uniquechunkidx);
   
-  if startrunoncluster,
+  if startrunoncluster || fixrunoncluster,
     
     assert(~isempty(inmatfile));
     if ~exist(outdir,'dir'),
@@ -153,6 +251,9 @@ else
       chunki0 = (i-1)*nchunksperjob + 1;
       chunki1 = min(nuniquechunks,i*nchunksperjob);
       outmatfile = outmatfiles{i};
+      if fixrunoncluster && exist(outmatfile,'file'),
+        continue;
+      end
       scriptfile = fullfile(outdir,[scriptfilestr,sprintf('_chunk%dto%d.sh',chunki0,chunki1)]);
       logfile = fullfile(outdir,[logfilestr,sprintf('_chunk%dto%d.log',chunki0,chunki1)]);
       jobid = sprintf('RegionalMax_chunk%dto%d_%d',chunki0,chunki1,i);
